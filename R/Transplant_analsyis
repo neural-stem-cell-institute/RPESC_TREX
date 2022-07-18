@@ -1,0 +1,197 @@
+library(BayesFactor)
+library(ggplot2)
+library(coda)
+
+### Functions
+HDIofMCMC = function( sampleVec , credMass=0.95 ) {
+  sortedPts = sort( sampleVec )
+  ciIdxInc = ceiling( credMass * length( sortedPts ) )
+  nCIs = length( sortedPts ) - ciIdxInc
+  ciWidth = rep( 0 , nCIs )
+  for ( i in 1:nCIs ) {
+    ciWidth[ i ] = sortedPts[ i + ciIdxInc ] - sortedPts[ i ]
+  }
+  HDImin = sortedPts[ which.min( ciWidth ) ]
+  HDImax = sortedPts[ which.min( ciWidth ) + ciIdxInc ]
+  HDIlim = c( HDImin , HDImax )
+  return( HDIlim )
+}
+
+### Data available from Table S13
+### Transplants divided into efficacious (1) and non-efficacious (0) based on OKT data with spatial frequency higher than .400 considered efficacious.
+### Bayesian approach to compare populations. 
+### Used sham transplanted animals as a base to set a Region of Practical Equivalence (ROPE) based on the Highest Density Interval (HDI).
+### Compared ROPE to the HDI of the other populations
+### Plotted histograms of the sham data with each population (Empty Vector, TREX-OE, RPE_255) 
+
+x<-proportionBF(6,92,6/92)
+yn<-posterior(x,iterations = 10000)
+yn1<-posterior(x,iterations = 10000)
+gelman.plot(mcmc.list(yn,yn1))
+gelman.diag(mcmc.list(yn,yn1))
+zn<-sort(yn[,2],decreasing=F)
+ROPE<-HDIofMCMC(zn)
+
+x<-proportionBF(2,8,6/92)
+ye<-posterior(x,iterations = 10000)
+ye1<-posterior(x,iterations = 10000)
+gelman.plot(mcmc.list(ye,ye1))
+gelman.diag(mcmc.list(ye,ye1))
+zen<-sort(ye[,2],decreasing=F)
+EVn<-HDIofMCMC(zen)
+
+x<-proportionBF(6,8,6/92)
+yt<-posterior(x,iterations = 10000)
+yt1<-posterior(x,iterations = 10000)
+gelman.plot(mcmc.list(yt,yt1))
+gelman.diag(mcmc.list(yt,yt1))
+ztn<-sort(yt[,2],decreasing=F)
+OEn<-HDIofMCMC(ztn)
+
+x<-proportionBF(5,5,6/92)
+y255<-posterior(x,iterations = 10000)
+y255b<-posterior(x,iterations = 10000)
+gelman.plot(mcmc.list(y255,y255b))
+gelman.diag(mcmc.list(y255,y255b))
+y255<-sort(y255[,2],decreasing=F)
+y255HDI<-HDIofMCMC(y255)
+
+### Plotting
+
+df1<-data.frame(c(zn,zen),c(rep("null",length(zn)),rep("EmptyVector",length(zen))))
+colnames(df1)<-c("values","group")
+
+df2<-data.frame(c(zn,ztn),c(rep("null",length(ztn)),
+                                   rep("TREX_OE",length(ztn))))
+colnames(df2)<-c("values","group")
+
+df5<-data.frame(c(zn,y255),c(rep("null",length(zn)),rep("RPE_255_2wks",length(y255))))
+colnames(df5)<-c("values","group")
+
+cols<-c("deepskyblue2","grey70")
+
+p1<-ggplot(df1,aes(values,color=group,y=..ndensity..))
+p1<-p1+ theme_bw(base_size=18)
+p1<-p1 + geom_density(alpha=.4,position="identity",size=2)
+p1<-p1 +theme(legend.text = element_text( size=10,
+                                          face="bold"))
+p1<-p1 +theme(legend.title=element_blank())
+p1<-p1 + theme(legend.key = element_rect(size = 20),
+               legend.key.size = unit(2, 'lines'))
+p1<-p1 + labs(x="Probability of Efficacious Transplant", y="Density")
+p1<-p1+ geom_segment(aes(x = ROPE[1], y = .15, xend = ROPE[1], yend = 0.25),size=1.5,color="black")
+p1<-p1+ geom_segment(aes(x = ROPE[2], y = .15, xend = ROPE[2], yend = 0.25),size=1.5,color="black")
+p1<-p1+ geom_segment(aes(x = ROPE[1], y = .2, xend = ROPE[2], yend = 0.2),size=1.5,color="black")
+
+p1<-p1+ geom_segment(aes(x = EVn[1], y = .27, xend = EVn[1], yend = 0.37),size=1.5,color="blue")
+p1<-p1+ geom_segment(aes(x = EVn[2], y = .27, xend = EVn[2], yend = 0.37),size=1.5,color="blue")
+p1<-p1+ geom_segment(aes(x = EVn[1], y = .32, xend = EVn[2], yend = 0.32),size=1.5,color="blue")
+
+p1<-p1+scale_color_manual(values=cols)
+p1<-p1+scale_fill_manual(values=cols)
+p1<-p1+xlim(c(0,1))
+
+p1
+dev.off()
+
+p2<-ggplot(df2,aes(values,color=group,y=..ndensity..))
+p2<-p2+ theme_bw(base_size=18)
+p2<-p2 + geom_density(alpha=.4,position="identity",size=2)
+p2<-p2 +theme(legend.text = element_text( size=10,
+                                          face="bold"))
+p2<-p2 +theme(legend.title=element_blank())
+p2<-p2 + theme(legend.key = element_rect(size = 20),
+               legend.key.size = unit(2, 'lines'))
+p2<-p2 + labs(x="Probability of Efficacious Transplant", y="Density")
+p2<-p2+ geom_segment(aes(x = ROPE[1], y = .15, xend = ROPE[1], yend = 0.25),size=1.5,color="black")
+p2<-p2+ geom_segment(aes(x = ROPE[2], y = .15, xend = ROPE[2], yend = 0.25),size=1.5,color="black")
+p2<-p2+ geom_segment(aes(x = ROPE[1], y = .2, xend = ROPE[2], yend = 0.2),size=1.5,color="black")
+
+p2<-p2+ geom_segment(aes(x = OEn[1], y = .27, xend = OEn[1], yend = 0.37),size=1.5,color="red4")
+p2<-p2+ geom_segment(aes(x = OEn[2], y = .27, xend = OEn[2], yend = 0.37),size=1.5,color="red4")
+p2<-p2+ geom_segment(aes(x = OEn[1], y = .32, xend = OEn[2], yend = 0.32),size=1.5,color="red4")
+
+p2<-p2+scale_color_manual(values=cols)
+p2<-p2+scale_fill_manual(values=cols)
+p2<-p2+xlim(c(0,1))
+
+p2
+dev.off()
+
+
+p5<-ggplot(df5,aes(values,color=group,y=..ndensity..))
+p5<-p5+ theme_bw(base_size=18)
+p5<-p5 + geom_density(alpha=.4,position="identity",size=2)
+p5<-p5 +theme(legend.text = element_text( size=10,
+                                          face="bold"))
+p5<-p5 +theme(legend.title=element_blank())
+p5<-p5 + theme(legend.key = element_rect(size = 20),
+               legend.key.size = unit(2, 'lines'))
+p5<-p5 + labs(x="Probability of Efficacious Transplant", y="Density")
+
+p5<-p5+ geom_segment(aes(x = y255HDI[1], y = .27, xend = y255HDI[1], yend = 0.37),size=1.5,color="red4")
+p5<-p5+ geom_segment(aes(x = y255HDI[2], y = .27, xend = y255HDI[2], yend = 0.37),size=1.5,color="red4")
+p5<-p5+ geom_segment(aes(x = y255HDI[1], y = .32, xend = y255HDI[2], yend = 0.32),size=1.5,color="red4")
+
+p5<-p5+ geom_segment(aes(x = ROPE[1], y = .15, xend = ROPE[1], yend = 0.25),size=1.5,color="green4")
+p5<-p5+ geom_segment(aes(x = ROPE[2], y = .15, xend = ROPE[2], yend = 0.25),size=1.5,color="green4")
+p5<-p5+ geom_segment(aes(x = ROPE[1], y = .2, xend = ROPE[2], yend = 0.2),size=1.5,color="green4")
+
+
+p5<-p5+scale_color_manual(values=cols)
+p5<-p5+scale_fill_manual(values=cols)
+p5<-p5+xlim(c(0,1))
+
+p5
+
+##frequentist approach
+
+##Empty Vector compared to Sham 
+binom.test(2,8,6/92)
+
+#data:  2 and 8
+#number of successes = 2, number of trials = 8, p-value = 0.09157
+#alternative hypothesis: true probability of success is not equal to 0.06521739
+#95 percent confidence interval:
+#  0.03185403 0.65085579
+#sample estimates:
+#  probability of success 
+#0.25 
+
+## TREX-OE compared to Sham
+binom.test(6,8,6/92)
+
+#data:  6 and 8
+#number of successes = 6, number of trials = 8, p-value = 1.92e-06
+#alternative hypothesis: true probability of success is not equal to 0.06521739
+#95 percent confidence interval:
+#  0.3491442 0.9681460
+#sample estimates:
+#  probability of success 
+#0.75 
+
+#TREX-OE compared to Empty Vector
+binom.test(6,8,2/8)
+
+#data:  6 and 8
+#number of successes = 6, number of trials = 8, p-value = 0.004227
+#alternative hypothesis: true probability of success is not equal to 0.25
+#95 percent confidence interval:
+#  0.3491442 0.9681460
+#sample estimates:
+#  probability of success 
+#0.75 
+
+## RPE255 at 2 weeks compared to Sham
+binom.test(5,5,6/92)
+
+#data:  5 and 5
+#number of successes = 5, number of trials = 5, p-value = 1.18e-06
+#alternative hypothesis: true probability of success is not equal to 0.06521739
+#95 percent confidence interval:
+#  0.4781762 1.0000000
+#sample estimates:
+#  probability of success 
+#1 
+
+
