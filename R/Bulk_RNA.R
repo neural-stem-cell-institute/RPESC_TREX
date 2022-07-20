@@ -27,7 +27,7 @@ library(GOfuncR)
 
 ########### read bulk data in from Bam files
 
-hg19<-makeTranscriptDbFromUCSC("hg19","knownGene")
+hg19<-makeTxDbFromUCSC("hg19","knownGene")
 hg19e<-exons(hg19)
 hg19eg<-exonsBy(hg19, "gene")
 load("lincRNAbase")
