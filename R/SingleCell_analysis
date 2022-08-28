@@ -77,6 +77,97 @@ probs<-function(object) {
 
 ####prepping data (Farhad)
 
+library(hypeR)
+library(doParallel)
+library(org.Hs.eg.db)
+library(pCalibrate)
+library(ggplot2)
+library(Seurat)
+library(RColorBrewer)
+library(riverplot)
+library(foreach)
+library(GO.db)
+library(rrvgo)
+library(GOfuncR)
+library(slingshot)
+library(igraph)
+library(gam)
+library(dplyr)
+library(tidyverse)
+library(data.table)
+library(magrittr)
+
+options(future.globals.maxSize=10000 * 1024 ^ 2)
+
+# read in the cogent mapping software outputs
+sets<-list.files(pattern = ".rds") %>% map (readRDS) %>% map(function(x) x[["raw_data"]]$gm)
+meta<-list.files(pattern = ".rds") %>% map (readRDS) %>% map(function(x) x$raw_data$metadata$Sample)
+names(sets)<-list.files(pattern = ".rds")
+names(meta)<-list.files(pattern = ".rds")
+
+for (i in 1:length(sets)) {
+  # correct rownames
+  gene.names<-rownames(sets[[i]])
+  id<-which(!duplicated(gsub(".*_","",gene.names)))
+  gene.names[id]<-gsub(".*_","",gene.names[id])
+  rownames(sets[[i]])<-gene.names
+  
+  # remove controls
+  sets[[i]]<-sets[[i]][,!grepl("Ctrl",meta[[i]])]
+}
+
+# create seurat objects
+obj.list<-lapply(sets, function(x) CreateSeuratObject(counts = x,
+                                                      umi.assay = "RNA",
+                                                      min.cells = 3,
+                                                      min.features = 200))
+# add metadata
+for (i in 1:length(obj.list)) {
+  name<-unlist(strsplit(names(obj.list)[i], split = "_|\\."))
+  name<-paste(name[[3]],"_",name[[4]], sep = "")
+  obj.list[[i]]@meta.data$time<-name
+}
+
+# integrating datasets using Seurat
+
+obj.list<-lapply(obj.list, function(x) SCTransform(x,verbose=F))
+
+int.features<-SelectIntegrationFeatures(object.list = obj.list, nfeatures = 4000) #3000
+
+prep.list<-PrepSCTIntegration(object.list = obj.list,
+                              anchor.features = int.features,
+                              verbose = FALSE)
+
+anchors<-FindIntegrationAnchors(object.list = prep.list, normalization.method = "SCT", 
+                                anchor.features = int.features, verbose = FALSE,reduction="cca")
+
+int.obj<-IntegrateData(anchorset = anchors, normalization.method = "SCT", verbose = FALSE)
+
+int.obj<-RunPCA(int.obj,verbose=F)
+ElbowPlot(int.obj)
+int.obj<-RunUMAP(int.obj,dims=1:15)
+int.obj <- FindNeighbors(int.obj, dims = 1:15)
+int.obj <- FindClusters(int.obj, resolution = 0.5)
+
+DimPlot(int.obj,group.by="seurat_clusters",label=T, pt.size = .1)
+
+DefaultAssay(int.obj)<-"integrated"
+int.obj<-NormalizeData(int.obj,verbose=F)
+int.obj<-ScaleData(int.obj,features=rownames(int.obj@assays$RNA@counts))
+
+time.p<-int.obj$time
+time.p[grep("2W",time.p)]<-"2 weeks"
+time.p[grep("4W",time.p)]<-"4 weeks"
+time.p[grep("8W",time.p)]<-"8 weeks"
+
+donor<-int.obj$time
+donor[grep("318",donor)]<-"318"
+donor[grep("319",donor)]<-"319"
+donor[grep("322",donor)]<-"322"
+
+int.obj$timepoint<-time.p
+int.obj$donor<-donor
+
 
 ## prep sc data (Nathan) and generate .RDS for sharing
 DefaultAssay(int.obj)<-"SCT"
@@ -264,10 +355,85 @@ y<-y[y$avg_log2FC>1,]
 intersect(intersect(y$gene,nuc),TF)
 
 
+#seeionInfo
 
+R version 4.0.3 (2020-10-10)
+Platform: x86_64-apple-darwin17.0 (64-bit)
+Running under: macOS Big Sur 10.16
 
+Matrix products: default
+LAPACK: /Library/Frameworks/R.framework/Versions/4.0/Resources/lib/libRlapack.dylib
 
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
 
+attached base packages:
+ [1] splines   stats4    parallel  stats     graphics  grDevices utils     datasets  methods   base     
 
+other attached packages:
+ [1] magrittr_2.0.1       data.table_1.14.0    forcats_0.5.1        stringr_1.4.0       
+ [5] purrr_0.3.4          readr_2.0.0          tidyr_1.1.3          tibble_3.1.3        
+ [9] tidyverse_1.3.1      dplyr_1.0.7          gam_1.20             igraph_1.2.6        
+[13] slingshot_1.8.0      princurve_2.1.6      GOfuncR_1.10.0       vioplot_0.3.7       
+[17] zoo_1.8-9            sm_2.2-5.6           rrvgo_1.2.0          GO.db_3.12.1        
+[21] riverplot_0.10       RColorBrewer_1.1-2   ggplot2_3.3.5        pCalibrate_0.2-1    
+[25] MCMCpack_1.5-0       MASS_7.3-54          coda_0.19-4          exact2x2_1.6.5      
+[29] exactci_1.4-2        testthat_3.0.4       ssanv_1.1            org.Hs.eg.db_3.12.0 
+[33] AnnotationDbi_1.52.0 IRanges_2.24.1       S4Vectors_0.28.1     Biobase_2.50.0      
+[37] BiocGenerics_0.36.1  doParallel_1.0.16    iterators_1.0.13     foreach_1.5.1       
+[41] hypeR_1.6.0          Seurat_4.1.0         SeuratObject_4.0.4  
 
-
+loaded via a namespace (and not attached):
+  [1] SparseM_1.81                scattermore_0.7             bit64_4.0.5                
+  [4] knitr_1.33                  irlba_2.3.3                 DelayedArray_0.16.3        
+  [7] rpart_4.1-15                RCurl_1.98-1.3              generics_0.1.0             
+ [10] cowplot_1.1.1               RSQLite_2.2.7               RANN_2.6.1                 
+ [13] future_1.21.0               bit_4.0.4                   tzdb_0.1.2                 
+ [16] spatstat.data_2.1-0         webshot_0.5.2               xml2_1.3.2                 
+ [19] lubridate_1.7.10            httpuv_1.6.1                SummarizedExperiment_1.20.0
+ [22] assertthat_0.2.1            xfun_0.24                   hms_1.1.0                  
+ [25] babelgene_21.4              evaluate_0.14               promises_1.2.0.1           
+ [28] fansi_0.5.0                 dbplyr_2.1.1                readxl_1.3.1               
+ [31] DBI_1.1.1                   htmlwidgets_1.5.3           mcmc_0.9-7                 
+ [34] spatstat.geom_2.2-2         ellipsis_0.3.2              RSpectra_0.16-0            
+ [37] backports_1.2.1             gridBase_0.4-7              deldir_0.2-10              
+ [40] MatrixGenerics_1.2.1        vctrs_0.3.8                 SingleCellExperiment_1.12.0
+ [43] quantreg_5.86               ROCR_1.0-11                 abind_1.4-5                
+ [46] cachem_1.0.5                withr_2.4.2                 ggforce_0.3.3              
+ [49] treemap_2.4-2               sctransform_0.3.3           goftest_1.2-2              
+ [52] svglite_2.0.0               cluster_2.1.2               ape_5.5                    
+ [55] lazyeval_0.2.2              crayon_1.4.1                pkgconfig_2.0.3            
+ [58] slam_0.1-48                 labeling_0.4.2              tweenr_1.0.2               
+ [61] GenomeInfoDb_1.26.7         nlme_3.1-152                wordcloud_2.6              
+ [64] rlang_0.4.11                globals_0.14.0              lifecycle_1.0.0            
+ [67] miniUI_0.1.1.1              MatrixModels_0.5-0          modelr_0.1.8               
+ [70] cellranger_1.1.0            tcltk_4.0.3                 polyclip_1.10-0            
+ [73] matrixStats_0.60.0          lmtest_0.9-38               Matrix_1.3-4               
+ [76] reprex_2.0.1                ggridges_0.5.3              pheatmap_1.0.12            
+ [79] png_0.1-7                   viridisLite_0.4.0           bitops_1.0-7               
+ [82] KernSmooth_2.23-20          visNetwork_2.0.9            blob_1.2.2                 
+ [85] parallelly_1.27.0           mapplots_1.5.1              scales_1.1.1               
+ [88] memoise_2.0.0               plyr_1.8.6                  ica_1.0-2                  
+ [91] zlibbioc_1.36.0             compiler_4.0.3              tinytex_0.33               
+ [94] kableExtra_1.3.4            fitdistrplus_1.1-5          cli_3.1.0                  
+ [97] XVector_0.30.0              listenv_0.8.0               patchwork_1.1.1            
+[100] pbapply_1.4-3               mgcv_1.8-36                 tidyselect_1.1.1           
+[103] stringi_1.7.3               GOSemSim_2.16.1             ggrepel_0.9.1              
+[106] grid_4.0.3                  tools_4.0.3                 future.apply_1.7.0         
+[109] rstudioapi_0.13             gridExtra_2.3               farver_2.1.0               
+[112] Rtsne_0.15                  digest_0.6.27               shiny_1.6.0                
+[115] Rcpp_1.0.7                  GenomicRanges_1.42.0        broom_0.7.9                
+[118] later_1.2.0                 RcppAnnoy_0.0.19            httr_1.4.2                 
+[121] colorspace_2.0-2            rvest_1.0.1                 fs_1.5.0                   
+[124] tensor_1.5                  reticulate_1.20             uwot_0.1.10                
+[127] conquer_1.0.2               spatstat.utils_2.2-0        plotly_4.9.4.1             
+[130] systemfonts_1.0.2           xtable_1.8-4                jsonlite_1.7.2             
+[133] NLP_0.2-1                   R6_2.5.0                    tm_0.7-8                   
+[136] pillar_1.6.2                htmltools_0.5.1.1           mime_0.11                  
+[139] glue_1.4.2                  fastmap_1.1.0               reactable_0.2.3            
+[142] codetools_0.2-18            utf8_1.2.2                  lattice_0.20-44            
+[145] spatstat.sparse_2.0-0       leiden_0.3.9                gtools_3.9.2               
+[148] zip_2.2.0                   openxlsx_4.2.4              survival_3.2-11            
+[151] rmarkdown_2.9               munsell_0.5.0               GenomeInfoDbData_1.2.4     
+[154] haven_2.4.3                 reshape2_1.4.4              gtable_0.3.0               
+[157] msigdbr_7.4.1               spatstat.core_2.3-0    
