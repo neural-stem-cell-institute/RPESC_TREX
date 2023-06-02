@@ -36,7 +36,7 @@ RNA<-c(hg19eg,lincRNA)
 x<-dir()
 
 test<-foreach(i=1:length(x)) %do% {
-y<-readGAlignments(x[1],format="BAM")
+y<-readGAlignments(x[i],format="BAM")
 RNA.sample.ID<-summarizeOverlaps(RNA,y,mode="IntersectionNotEmpty")
 counts.RNA.sample.ID<-assay(RNA.sample.ID)
 list(counts.RNA.sample.ID,counts.exon.sample.ID)
@@ -293,7 +293,7 @@ table(y)
 # Eff NonEff     W2 
 # 232    291    942
 
-### Lnc-RNA TOM
+### Lnc-RNA Time of maximum
 x<-x[grep("TCONS",rownames(x)),]
 y<-apply(x,1,function(z) colnames(x)[which(z==max(z))])
 table(y)
