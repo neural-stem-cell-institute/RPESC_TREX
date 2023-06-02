@@ -2,7 +2,7 @@ library(BayesFactor)
 library(ggplot2)
 library(coda)
 
-### Functions
+### Function from https://github.com/variani/dbda/blob/master/R/DBDA2E-utilities.R
 HDIofMCMC = function( sampleVec , credMass=0.95 ) {
   sortedPts = sort( sampleVec )
   ciIdxInc = ceiling( credMass * length( sortedPts ) )
