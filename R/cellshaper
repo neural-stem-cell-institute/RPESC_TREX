@@ -1,0 +1,275 @@
+# analyze RPE morphology
+# developer: Farhad Farjood
+# cellshaper function takes the output of imageJ ridge detection on Phalloidin images of RPE monolayers and
+# returns the results of morphometric analysis
+
+library(RColorBrewer)
+library(ggplot2)
+library(plyr)
+library(doParallel)
+
+# function to find neighbor cells
+cellneighbor<-function(image.label,id){
+  require(doParallel)
+  require(foreach)
+  
+  registerDoParallel(makeCluster(3))
+  
+  y<-image.label
+  # border objects
+  edgeid<-unique(c(y[1,], y[,1], y[nrow(y),], y[,ncol(y)]))
+  # edgeid<-setdiff(edgeid,0)
+  # edges<-which(y %in% edgeid)
+  
+  z<-foreach (i=as.numeric(id), .packages="raster") %dopar% {
+    matrixid<-which(y@.Data==i, arr.ind=TRUE)
+    matrixid.n<-matrixid; matrixid.n[,"row"]<-matrixid.n[,"row"]-2
+    matrixid.w<-matrixid; matrixid.w[,"col"]<-matrixid.w[,"col"]-2
+    matrixid.s<-matrixid; matrixid.s[,"row"]<-matrixid.s[,"row"]+2
+    matrixid.e<-matrixid; matrixid.e[,"col"]<-matrixid.e[,"col"]+2
+    matrixid.nw<-matrixid; matrixid.nw[,"row"]<-matrixid.nw[,"row"]-2;matrixid.nw[,"col"]<-matrixid.nw[,"col"]-2
+    matrixid.sw<-matrixid; matrixid.sw[,"row"]<-matrixid.sw[,"row"]+2;matrixid.sw[,"col"]<-matrixid.sw[,"col"]-2
+    matrixid.se<-matrixid; matrixid.se[,"row"]<-matrixid.se[,"row"]+2;matrixid.se[,"col"]<-matrixid.se[,"col"]+2
+    matrixid.ne<-matrixid; matrixid.ne[,"row"]<-matrixid.ne[,"row"]-2;matrixid.ne[,"col"]<-matrixid.ne[,"col"]+2
+    
+    ids<-rbind(matrixid.n,matrixid.w,matrixid.s,matrixid.w,
+               matrixid.nw,matrixid.sw,matrixid.se,matrixid.ne)
+    
+    for (j in 1:nrow(ids)){
+      if (ids[j,1]<1){
+        ids[j,1]<-1
+      } else if (ids[j,1]>nrow(y)){
+        ids[j,1]<-nrow(y)
+      } else if (ids[j,2]<1){
+        ids[j,2]<-1
+      } else if (ids[j,2]>ncol(y)){
+        ids[j,2]<-ncol(y)
+      }
+    }
+    
+    neighbor.id<-unique(y@.Data[ids])
+    
+    # remove border objects
+    neighbor.id<-setdiff(neighbor.id, c(i,0,edgeid))
+    neighbor.id
+  }
+  names(z)<-id
+  z
+}
+
+# function to perform morphometric analysis of RPE cells
+# using fluorescence microscope images of cell membrane using the EBImage package
+cellshaper<-function(image,brush_size=2,feature="m.eccentricity",nbin=4,refcut=NULL,colpal="PuBu",ref){
+  
+  require(RColorBrewer)
+  require(EBImage)
+  
+  # load again and label
+  x<-readImage(image)
+  #display(x, title='Binary')
+  x = opening(x, makeBrush(brush_size, shape='disc'))
+  y <- bwlabel(x)
+  #display(normalize(y), title='Segmented')
+  z<-colorLabels(y, normalize = T)
+  #display(z, title='Colored segmentation')
+  
+  ftrs<-cbind(computeFeatures.moment(y,x),computeFeatures.shape(y,x))
+  
+  # change labels
+  prop<-as.data.frame(ftrs)
+  prop$compactness<-(4*pi*prop$s.area)/(prop$s.perimeter^2)
+  
+  pix<-0.493^2
+  prop$area<-prop$s.area*pix
+  
+  prop$minoraxis<-sqrt((1-prop$m.eccentricity^2)*prop$m.majoraxis^2)
+  prop$aspectratio<-prop$m.majoraxis/prop$minoraxis
+  prop$elongation<-prop$minoraxis/prop$m.majoraxis
+  
+  # only use for reference 2w
+  if (ref){
+    refcut<-quantile(prop[,feature], seq(0,1,1/nbin))
+    if (max(refcut)<1){
+      refcut[1]<-0
+      refcut[nbin+1]<-1
+    }
+  }
+  q<-quantile(prop[,feature], seq(0,1,1/nbin))
+  if (max(q)>max(refcut)){refcut[nbin+1]<-max(q)}
+  # use 2-week cutoffs for binning
+  
+  circbin<-prop
+  circbin$quantile<-cut(prop[,feature], refcut, labels<-c(1:nbin))
+  circbin$id<-rownames(circbin)
+  
+  # #binning with size
+  # dbin<-prop%>% mutate(quantile = ntile(s.area,4))%>%group_by(quantile)
+  # dbin$id<-rownames(dbin)
+  # 
+  # # binning with morphology
+  # circbin<-prop%>% mutate(quantile = ntile(circ,4))%>%group_by(quantile)
+  # circbin$id<-rownames(circbin)
+  
+  #create color palette
+  pal <- heat.colors(n = nbin+1)
+  pal<-brewer.pal(n=nbin+1,colpal)
+  palrgb <- col2rgb(pal)/255
+  
+  z2<-z@.Data
+  l<-levels(as.factor(circbin$quantile))
+  
+  for (i in 1:length(l)) {
+    mx<-which(circbin$quantile==as.numeric(l[i]))
+    mx<-which(y %in% mx)
+    z2[,,1][mx]<-palrgb[1,i]
+    z2[,,2][mx]<-palrgb[2,i]
+    z2[,,3][mx]<-palrgb[3,i]
+    }
+  
+  # remove border objects
+  edgeid<-unique(c(y[1,], y[,1], y[nrow(y),], y[,ncol(y)]))
+  edges<-which(y %in% edgeid)
+  z2[,,1][edges]<-0
+  z2[,,2][edges]<-0
+  z2[,,3][edges]<-0
+  circbin<-circbin[setdiff(1:nrow(circbin),edgeid),]
+  
+  z@.Data<-z2
+  display(z, title='Colored segmentation')
+  
+  nbr<-cellneighbor(y,circbin$id)
+  circbin$neighbor<-unlist(lapply(nbr,function(x) length(x)))
+  l<-list(bins=refcut,image=z,labels=y,features=circbin, neighborhood=nbr)
+  return(l)
+}
+
+#function to label a cell in an Image class image
+labelcells<-function(image,image.label,cellid){
+  z2<-image@.Data
+  mx<-which(image.label %in% cellid)
+  z2[,,1][mx]<-1
+  z2[,,2][mx]<-0
+  z2[,,3][mx]<-0
+  
+  image@.Data<-z2
+  display(image, title='Colored segmentation')
+  return(image)
+}
+
+
+# data analysis example
+
+refcut1 = c(0,150,250,350,1e10)
+nbin1<-length(refcut1)-1
+
+cutrf3182<-cellshaper(image = "TW318-2W-3-mask4-pruned.tif",brush_size = 2, nbin = nbin1,ref = F, refcut = refcut1, colpal = "PuBu", feature = "area")
+cutrf3184<-cellshaper(image = "TW318-4W-3-mask-pruned.tif",brush_size = 2, nbin = nbin1,ref = F, refcut = refcut1, colpal = "PuBu", feature = "area")
+cutrf3188<-cellshaper(image = "TW318-8W-5_ride-watershed_ED-pruned.tif",brush_size = 2, nbin = nbin1,ref = F, refcut = refcut1, colpal = "PuBu", feature = "area")
+
+cutrf3192<-cellshaper(image = "TW319-2W-3-ED-pruned.tif",brush_size = 2, nbin = nbin1,ref = F, refcut = refcut1, feature = "area")
+cutrf3194<-cellshaper(image = "TW319-4W-1-pruned-final.tif",brush_size = 2, nbin = nbin1,ref = F, colpal = "PuBu", refcut = refcut1, feature = "area")
+cutrf3198<-cellshaper(image = "TW319-8W-5-ridge-watershed-ED-pruned.tif",brush_size = 2, nbin = nbin1,ref = F, colpal = "PuBu", refcut = refcut1, feature = "area")
+
+cutrf3222<-cellshaper(image = "TW322-2W-1-watershed-ED-pruned.tif",brush_size = 2, nbin = nbin1,ref = F, refcut = refcut1, colpal = "PuBu", feature = "area")
+cutrf3224<-cellshaper(image = "TW322-4W-2_ridge-ED-pruned.tif",brush_size = 2, nbin = nbin1,ref = F, refcut = refcut1, colpal = "PuBu", feature = "area")
+cutrf3228<-cellshaper(image = "TW322-8W-5-watershed-ED-pruned.tif",brush_size = 2, nbin = nbin1,ref = F, refcut = refcut1, colpal = "PuBu", feature = "area")
+
+
+# find and label neighbors example
+
+a<-cellneighbor(cutrf3198[[3]],cutrf3198[[4]]$id)
+k<-labelcells(cutrf3198[[2]],image.label =cutrf3198[[3]] ,cellid ="154")
+display(k)
+k<-labelcells(cutrf3198[[2]],image.label =cutrf3198[[3]] ,cellid =a[["154"]])
+display(k)
+
+
+# Tukey test
+
+model <- aov(neighbor~quantile, data=df)
+tt<-TukeyHSD(model, conf.level=.99)
+
+
+plot(TukeyHSD(model, conf.level=.99), las = 2)
+
+cor(df$area, df$compactness)
+
+ddf<-df[,c("time","quantile")]
+
+ggplot(df, aes(time, fill=quantile)) +
+  geom_bar()+scale_fill_brewer(palette="PuBu")+
+  theme_classic()
+
+
+w2c<-100*table(ddf[ddf$time=="2w",])/nrow(ddf[ddf$time=="2w",])
+w4c<-100*table(ddf[ddf$time=="4w",])/nrow(ddf[ddf$time=="4w",])
+w8c<-100*table(ddf[ddf$time=="8w",])/nrow(ddf[ddf$time=="8w",])
+
+ddfc<-reshape2::melt(rbind(w2c,w4c,w8c))
+colnames(ddfc)<-c("time","quantile","percentage")
+
+ggplot(ddfc, aes(fill=as.factor(quantile), y=percentage, x=time)) +
+  geom_bar(position="stack", stat="identity")+scale_fill_brewer(palette="PuBu")+
+  theme_classic()
+
+
+specie <- c(rep("sorgho" , 3) , rep("poacee" , 3) , rep("banana" , 3) , rep("triticum" , 3) )
+condition <- rep(c("normal" , "stress" , "Nitrogen") , 4)
+value <- abs(rnorm(12 , 0 , 15))
+data <- data.frame(specie,condition,value)
+
+
+# create a ggplot graph
+
+c28<-cutrf3182[[4]]
+c28$time<-"2w"
+c48<-cutrf3184[[4]]
+c48$time<-"4w"
+c88<-cutrf3188[[4]]
+c88$time<-"8w"
+
+c29<-cutrf3192[[4]]
+c29$time<-"2w"
+c49<-cutrf3194[[4]]
+c49$time<-"4w"
+c89<-cutrf3198[[4]]
+c89$time<-"8w"
+
+
+c22<-cutrf3222[[4]]
+c22$time<-"2w"
+c42<-cutrf3224[[4]]
+c42$time<-"4w"
+c82<-cutrf3228[[4]]
+c82$time<-"8w"
+
+
+# ggplot figures
+
+df<-rbind(c28,c48,c88,c29,c49,c89,c22,c42,c82)
+
+p2 <- ggplot(df, aes(x=quantile, y=neighbor, fill=quantile)) + 
+  geom_boxplot(outlier.colour="black", outlier.shape=16, outlier.size=1, outlier.alpha = 0.1)+
+  theme_classic()+
+  scale_fill_brewer(palette="PuBu")
+p2
+
+
+p <- ggplot(df, aes(x=quantile, y=neighbor, fill=time))+
+  stat_boxplot(geom = "errorbar",width = 0.15)+
+  geom_boxplot(outlier.colour="black", outlier.shape=16, outlier.size=1, outlier.alpha = 0.1)+
+  theme_classic()+
+  scale_fill_brewer(palette="PuBu")
+p
+
+
+p <- ggplot(df, aes(quantile, fill=quantile)) +
+  geom_density(alpha=0.4, xlim = c(-0.8, 4.8))+
+  theme_classic()
+p
+
+
+mu <- ddply(df, "time", summarise, grp.mean=median(compactness))
+p+geom_vline(data=mu, aes(xintercept=grp.mean, color="red"),
+             linetype="dashed")
+
